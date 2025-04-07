@@ -13,6 +13,19 @@ services:
     networks:
       - proxynet
 
+  postgres:
+    image: debezium/postgres:16
+    hostname: postgres
+    container_name: postgres
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: postgres-user
+      POSTGRES_PASSWORD: postgres-pw
+      POSTGRES_DB: customers
+    networks:
+      - proxynet
+
   kafka-0:
     <<: *kafka-common
     restart: always
@@ -55,7 +68,7 @@ services:
   schema-registry:
     image: bitnami/schema-registry:7.6
     ports:
-      - '127.0.0.1:8081:8081'
+      - '8081:8081'
     depends_on:
       - kafka-0
       - kafka-1
@@ -70,23 +83,11 @@ services:
     image: provectuslabs/kafka-ui:v0.7.0
     restart: always
     ports:
-      - '127.0.0.1:8080:8080'
+      - '127.0.0.1:8085:8080'
     environment:
       KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS: kafka-0:9092
       KAFKA_CLUSTERS_0_NAME: kraft
-    networks:
-      - proxynet
-
-  postgres:
-    image: debezium/postgres:16
-    hostname: postgres
-    container_name: postgres
-    ports:
-      - '5432:5432'
-    environment:
-      POSTGRES_USER: postgres-user
-      POSTGRES_PASSWORD: postgres-pw
-      POSTGRES_DB: customers
+      cdSQLDBSERVER: http://ksqldb:8088
     networks:
       - proxynet
 
@@ -118,16 +119,43 @@ services:
       CONNECT_OFFSET_STORAGE_TOPIC: 'connect-offset-storage'
       CONNECT_STATUS_STORAGE_TOPIC: 'connect-status-storage'
 
-      CONNECT_KEY_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
-      CONNECT_VALUE_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
+      CONNECT_KEY_CONVERTER: 'io.confluent.connect.avro.AvroConverter'
+      CONNECT_VALUE_CONVERTER: 'io.confluent.connect.avro.AvroConverter'
       CONNECT_INTERNAL_KEY_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
       CONNECT_INTERNAL_VALUE_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
 
       CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: 'http://schema-registry:8081/'
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: 'http://schema-registry:8081/'
+      # Export JMX metrics to :9876/metrics for Prometheus
+      KAFKA_JMX_PORT: '9875'
+      KAFKA_OPTS: '-javaagent:/opt/jmx_prometheus_javaagent-0.15.0.jar=9876:/opt/kafka-connect.yml'
+      # Read connection password from file
+      CONNECT_CONFIG_PROVIDERS: 'file'
+      CONNECT_CONFIG_PROVIDERS_FILE_CLASS: 'org.apache.kafka.common.config.provider.FileConfigProvider'
 
       CONNECT_PLUGIN_PATH: /usr/share/java,/etc/kafka-connect/jars
     volumes:
-      - ./confluent-hub-components/:/etc/kafka-connect/jars 
+      - ./confluent-hub-components/:/etc/kafka-connect/jars
+    networks:
+      - proxynet
+
+  prometheus:
+    image: prom/prometheus:v2.30.3
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus:/etc/prometheus
+    command: --web.enable-lifecycle --config.file=/etc/prometheus/prometheus.yml
+    links:
+      - kafka-connect
+    networks:
+      - proxynet
+
+  grafana:
+    build:
+      context: ./grafana
+    ports:
+      - 3000:3000
     networks:
       - proxynet
 
