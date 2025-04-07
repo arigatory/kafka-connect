@@ -1,4 +1,3 @@
-version: '3.5'
 services:
   x-kafka-common: &kafka-common
     image: bitnami/kafka:3.7
